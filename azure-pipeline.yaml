@@ -1,0 +1,96 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: vmUser
+    value: 'azureuser'
+  - name: vmIp
+    value: '48.217.145.167'
+  - name: appFolder
+    value: '/home/azureuser/goapp'
+  - name: System.Debug
+    value: true
+
+stages:
+  - stage: Build
+    displayName: Build stage
+    jobs:
+      - job: Build
+        displayName: Build
+        steps:
+          - script: |
+              go build -o myapp main.go
+            displayName: 'Build Go application'
+
+          - task: ArchiveFiles@2
+            displayName: 'Archive files'
+            inputs:
+              rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+              replaceExistingArchive: true
+
+          - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+            artifact: drop
+
+  - stage: Deploy
+    displayName: Deploy to Azure VM
+    jobs:
+      - deployment: VMDeploy
+        displayName: Deploy Go App to VM
+        environment:
+          name: 'datadog'
+          resourceType: VirtualMachine
+          tags: 'dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: CopyFilesOverSSH@0
+                  displayName: 'Copy application files to VM'
+                  inputs:
+                    sshEndpoint: azure-vm
+                    runOptions: 'commands'
+                    sourceFolder: '$(Pipeline.Workspace)/drop'
+                    targetFolder: '$(appFolder)'
+                    cleanTargetFolder: true
+
+                - task: SSH@0
+                  displayName: 'List files in app directory'
+                  inputs:
+                    sshEndpoint: azure-vm
+                    runOptions: 'commands'
+                    commands: 'ls -l $(appFolder)'
+                    readyTimeout: '20000'
+
+                - task: SSH@0
+                  displayName: 'Unzip application files'
+                  inputs:
+                    sshEndpoint: azure-vm
+                    runOptions: 'commands'
+                    commands: 'unzip -o $(appFolder)/$(Build.BuildId).zip -d $(appFolder)'
+                    readyTimeout: '20000'
+
+                - task: SSH@0
+                  displayName: 'Set execute permissions on myapp'
+                  inputs:
+                    sshEndpoint: azure-vm
+                    runOptions: 'commands'
+                    commands: 'chmod +x $(appFolder)/myapp'
+                    readyTimeout: '20000'
+
+                - task: SSH@0
+                  displayName: 'Run Go application on VM'
+                  inputs:
+                    sshEndpoint: azure-vm
+                    runOptions: 'commands'
+                    commands: |
+                      pkill -f 'myapp' || true
+                      nohup $(appFolder)/myapp --port 8000 > $(appFolder)/myapp.log 2>&1 &
+                    readyTimeout: '20000'
+
+
