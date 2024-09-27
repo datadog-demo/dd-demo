@@ -6,7 +6,7 @@ import (
 )
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello from onepane.ai")
+	fmt.Fprintf(w, "Hello from datadog")
 }
 
 func main() {
